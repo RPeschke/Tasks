@@ -133,5 +133,5 @@ int main(int, char ** argv) {
   runTask(setBuffer("hallo", display()));
   runTask(setBuffer(vec, for_each()), display());
   runTask(setBuffer(vec, for_each()), display());
-  runTask(fileOpener("d:/DEVICE_1_ASIC_on_Position_5_400V.txt"), readFile(), display());
+   runTask(fileOpener("d:/DEVICE_1_ASIC_on_Position_5_400V.txt"), readFile(), display());
 }
