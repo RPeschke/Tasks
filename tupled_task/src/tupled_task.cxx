@@ -9,7 +9,7 @@ using namespace std;
 #define DEFINE_TASK(x) int __is_task(x&)
 #define  TASK_DEINITION(x) template<std::size_t N,typename T> void runTask(x, T&& next)
 #define  RUN_NEXT(buffer)  runTask<N+1>(set_buffer(get<N+1>(next),buffer), next)
-#define  RUN_NEXT0()  runTask<N+1>(get<N+1>(next), next)
+#define  RUN_NEXT0(buffer)  runTask<N+1>(get<N+1>(next), next)
 
 
 template <typename T,typename... Args>
@@ -69,8 +69,7 @@ public:
   batch(T& t) :m_tuple(t) {}
   T m_tuple;
 };
-template<typename T>
-int __is_batch(batch<T>&);
+
 template<typename T>
 batch<T> make_batch(T&& t) {
   return batch<T>(t);
@@ -108,19 +107,14 @@ void runTask(T&& t) {
 }
 
 template<typename T>
-void runTask(batch<T>&& tup) {
+void runTask(batch<T> tup) {
   auto t1 = tup >> stop();
   runTask(t1.m_tuple);
  // runTask<0>(get<0>(t1.m_tuple), t1.m_tuple);
 
 }
 
-// template <typename T, typename T1>
-// auto operator>>(T&& t, batch<T1> && batch_) {
-//   
-//  // set_buffer(get<0>(batch_.m_tuple), t);
-//   //runTask(batch_);
-// }
+
 int main()
 {
 
