@@ -7,16 +7,27 @@
 #include <memory>
 #include <vector>
 #include <future>
-#include <windows.h>
+
 #include <string>
 #include <condition_variable>
+#include <chrono>
 
 using namespace std;
+
+#define MULTI_THREADED___
 #define DEFINE_TASK(x) int __is_task(x&)
 #define  TASK_DEINITION(x) template<std::size_t N,typename T> void runTask(x, T&& next)
 #define  Template_TASK_DEINITION(x) template<std::size_t N,typename Tuple,typename T> void runTask(x, Tuple&& next)
 #define  RUN_NEXT(buffer)  runTask<N+1>(set_buffer(get<N+1>(next),buffer), next)
 #define  RUN_NEXT0()  runTask<N+1>(get<N+1>(next), next)
+
+
+template<class C, class T>
+auto contains(const C& v, const T& x)
+-> decltype(end(v), true)
+{
+  return end(v) != std::find(begin(v), end(v), x);
+}
 
 
 template <typename T, typename... Args>
@@ -180,28 +191,59 @@ TASK_DEINITION(count_to& task_) {
   }
   RUN_NEXT(i);
 }
+std::vector<thread::id> m_done;
+vector<thread> m_threads;
+condition_variable con;
+mutex m, m_done_mutex;
+size_t get_thread_size() {
+  unique_lock<mutex> lock(m);
+  return m_threads.size();
+}
 class thread_pool {
 public:
-     vector<thread> m_threads;
+     
      ~thread_pool()
      {
-       for (auto& e : m_threads) {
-         e.join();
-       }
+//        for (auto& e : m_threads) {
+//          e.join();
+//        }
      }
      void join() {
-       for (auto& e : m_threads) {
-         e.join();
-       }
+    //   unique_lock<mutex> lock(m);
+       while (true) {
+         
+         for (int i = 0; i < get_thread_size();++i) {
+
+           auto&e = m_threads[i];
+           if (contains(m_done, e.get_id())) {
+             e.join();
+             unique_lock<mutex> lock(m);
+             m_threads.erase(std::remove_if(m_threads.begin(), m_threads.end(), [](auto& e) {return e.get_id() == thread::id();}), m_threads.end());
+           }
+         }
+
+        if (m_threads.empty()){
+          break;
+        }
+        std::this_thread::sleep_for(std::chrono::milliseconds(1));   
+         //con.wait(lock);
+       } 
      }
      template <typename T>
-     void push_thread(T&& f) {
+     auto push_thread(T&& f) {
        lock_guard<mutex> lock(m);
+       auto* th = this;
+   
        m_threads.push_back(thread(f));
        return m_threads.back().get_id();
      }
+     void done() {
+   //    lock_guard<mutex> lock(m_done_mutex);
+       m_done.push_back(this_thread::get_id());
+     }
 
-     mutex m;
+    // std::vector<thread::id> m_done;
+   //  mutex m,m_done_mutex;
 };
 class start_async {
 public:
@@ -213,14 +255,26 @@ public:
 };
 DEFINE_TASK(start_async);
 
+class notify {
+public:
+  notify() {}
+  ~notify() {
+    {
+      unique_lock<mutex> lock(m_done_mutex);
+      m_done.push_back(this_thread::get_id());
+    }
+    con.notify_all();
+  }
+};
 TASK_DEINITION(start_async& tast_) {
 
   auto buffer = *tast_.buffer;
-  auto l = [&, buffer]() {
+  auto l = [&, buffer,next]() {
 
     auto lbuffer = buffer;
     auto local_copy = next;
 
+    notify n;
     runTask<N + 1>(set_buffer(get<N + 1>(local_copy), lbuffer), local_copy);
   };
     
@@ -248,6 +302,47 @@ TASK_DEINITION(mutex_task& task_) {
 
 
 
+class de_randomize {
+public:
+  de_randomize(thread_pool* tp_) :m_tp(tp_) {}
+  thread_pool* m_tp;
+  int* buffer;
+};
+DEFINE_TASK(de_randomize);
+
+
+
+bool current_thread() {
+  unique_lock<mutex> lock(m_done_mutex);
+ // m_threads.erase(std::remove_if(m_threads.begin(), m_threads.end(), [](auto& e) {return e.get_id() == thread::id();}), m_threads.end());
+  int i = 0;
+  for (auto& e : m_threads) {
+    
+    if (e.get_id()==thread::id()) {
+      continue;
+    }
+    if ( !contains(m_done,e.get_id())) {
+      
+      if (e.get_id()== this_thread::get_id()) {
+        
+        return true;
+      }
+      break;
+    }
+  }
+  
+  return false;
+}
+
+TASK_DEINITION(de_randomize& task_) {
+  std::unique_lock<std::mutex> lock(m);
+  while (!current_thread()) {
+    con.wait(lock);
+  }
+  RUN_NEXT(*task_.buffer);
+ // con.notify_all();
+}
+
 
 
 int main()
@@ -255,21 +350,25 @@ int main()
 
   //   auto t = make_tuple(taskA(), Display());
   //   auto t2 = tuple_cat(t, t, make_tuple(stop()));
-
-  std::vector<int> vec{ 10000000,2000000,300000,400000,500000,600000,700000 };
+  auto start = clock();
+  std::vector<int> vec{1000000000,2000000000,300000000,400000000,500000000,600000000,700000000,1000000000,2000000000,300000000,400000000,500000000,600000000,700000000, 1000000000,2000000000,300000000,400000000,500000000,600000000,700000000, 1000000000,2000000000,300000000,400000000,500000000,600000000,700000000, 1000000000,2000000000,300000000,400000000,500000000,600000000,700000000, 1000000000,2000000000,300000000,400000000,500000000,600000000,700000000, 1000000000,2000000000,300000000,400000000,500000000,600000000,700000000, 1000000000,2000000000,300000000,400000000,500000000,600000000,700000000, 1000000000,2000000000,300000000,400000000,500000000,600000000,700000000, 1000000000,2000000000,300000000,400000000,500000000,600000000,700000000, 1000000000,2000000000,300000000,400000000,500000000,600000000,700000000, 1000000000,2000000000,300000000,400000000,500000000,600000000,700000000, 1000000000,2000000000,300000000,400000000,500000000,600000000,700000000, 1000000000,2000000000,300000000,400000000,500000000,600000000,700000000, 1000000000,2000000000,300000000,400000000,500000000,600000000,700000000, 1000000000,2000000000,300000000,400000000,500000000,600000000,700000000, 1000000000,2000000000,300000000,400000000,500000000,600000000,700000000, 1000000000,2000000000,300000000,400000000,500000000,600000000,700000000, 1000000000,2000000000,300000000,400000000,500000000,600000000,700000000, 1000000000,2000000000,300000000,400000000,500000000,600000000,700000000, 1000000000,2000000000,300000000,400000000,500000000,600000000,700000000, 1000000000,2000000000,300000000,400000000,500000000,600000000,700000000, 1000000000,2000000000,300000000,400000000,500000000,600000000,700000000, 1000000000,2000000000,300000000,400000000,500000000,600000000,700000000, 1000000000,2000000000,300000000,400000000,500000000,600000000,700000000, 1000000000,2000000000,300000000,400000000,500000000,600000000,700000000, 1000000000,2000000000,300000000,400000000,500000000,600000000,700000000, 1000000000,2000000000,300000000,400000000,500000000,600000000,700000000, 1000000000,2000000000,300000000,400000000,500000000,600000000,700000000, 1000000000,2000000000,300000000,400000000,500000000,600000000,700000000, 1000000000,2000000000,300000000,400000000,500000000,600000000,700000000, 1000000000,2000000000,300000000,400000000,500000000,600000000,700000000, 1000000000,2000000000,300000000,400000000,500000000,600000000,700000000, 1000000000,2000000000,300000000,400000000,500000000,600000000,700000000, 1000000000,2000000000,300000000,400000000,500000000,600000000,700000000, 1000000000,2000000000,300000000,400000000,500000000,600000000,700000000, 1000000000,2000000000,300000000,400000000,500000000,600000000,700000000, 1000000000,2000000000,300000000,400000000,500000000,600000000,700000000, 1000000000,2000000000,300000000,400000000,500000000,600000000,700000000, 1000000000,2000000000,300000000,400000000,500000000,600000000,700000000, 1000000000,2000000000,300000000,400000000,500000000,600000000,700000000, 1000000000,2000000000,300000000,400000000,500000000,600000000,700000000, 1000000000,2000000000,300000000,400000000,500000000,600000000,700000000, 1000000000,2000000000,300000000,400000000,500000000,600000000,700000000};
   // set_buffer(taskB(), get_buffer(taskA()));
   thread_pool tp;
   vec | taskA()
-    //>> Display(std::string("before")) 
+#ifdef MULTI_THREADED___
     >> start_async(&tp)
+#endif // MULTI_THREADED___
     >> count_to()
-    >> mutex_task()
+#ifdef MULTI_THREADED___
+    >> de_randomize(&tp)
+#endif//MULTI_THREADED___
     >> Display(std::string("   after"));
   // auto t1 = tuple_cat(t, stop());
   //runTask(b);
  // runTask(t2);
- // Sleep(10000);
+  
   tp.join();
+  std::cout << clock() - start<< " ms"  << endl; //linear  (D 13022/ R 3237) ms // multi ( D 13022 / R 23) ms
   return 0;
 }
 
