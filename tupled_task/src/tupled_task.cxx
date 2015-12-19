@@ -14,7 +14,7 @@
 
 using namespace std;
 
-#define MULTI_THREADED___
+//#define MULTI_THREADED___
 #define DEFINE_TASK(x) int __is_task(x&)
 #define  TASK_DEINITION(x) template<std::size_t N,typename T> void runTask(x, T&& next)
 #define  Template_TASK_DEINITION(x) template<std::size_t N,typename Tuple,typename T> void runTask(x, Tuple&& next)
@@ -191,14 +191,8 @@ TASK_DEINITION(count_to& task_) {
   }
   RUN_NEXT(i);
 }
-std::vector<thread::id> m_done;
-vector<thread> m_threads;
-condition_variable con;
-mutex m, m_done_mutex;
-size_t get_thread_size() {
-  unique_lock<mutex> lock(m);
-  return m_threads.size();
-}
+
+
 class thread_pool {
 public:
      
@@ -241,9 +235,16 @@ public:
    //    lock_guard<mutex> lock(m_done_mutex);
        m_done.push_back(this_thread::get_id());
      }
-
+     size_t get_thread_size() {
+       unique_lock<mutex> lock(m);
+       return m_threads.size();
+     }
     // std::vector<thread::id> m_done;
    //  mutex m,m_done_mutex;
+     std::vector<thread::id> m_done;
+     vector<thread> m_threads;
+     condition_variable con;
+     mutex m, m_done_mutex;
 };
 class start_async {
 public:
@@ -257,24 +258,26 @@ DEFINE_TASK(start_async);
 
 class notify {
 public:
-  notify() {}
+  notify(thread_pool* tp) :m_tp(tp){}
   ~notify() {
     {
-      unique_lock<mutex> lock(m_done_mutex);
-      m_done.push_back(this_thread::get_id());
+      unique_lock<mutex> lock(m_tp->m_done_mutex);
+      m_tp->m_done.push_back(this_thread::get_id());
     }
-    con.notify_all();
+    m_tp->con.notify_all();
   }
+  thread_pool* m_tp;
 };
 TASK_DEINITION(start_async& tast_) {
 
   auto buffer = *tast_.buffer;
-  auto l = [&, buffer,next]() {
+  auto tp = tast_.m_tp;
+  auto l = [&, buffer,next,tp]() {
 
     auto lbuffer = buffer;
     auto local_copy = next;
 
-    notify n;
+    notify n(tp);
     runTask<N + 1>(set_buffer(get<N + 1>(local_copy), lbuffer), local_copy);
   };
     
@@ -307,37 +310,39 @@ public:
   de_randomize(thread_pool* tp_) :m_tp(tp_) {}
   thread_pool* m_tp;
   int* buffer;
+
+  bool current_thread() {
+    unique_lock<mutex> lock(m_tp->m_done_mutex);
+    // m_threads.erase(std::remove_if(m_threads.begin(), m_threads.end(), [](auto& e) {return e.get_id() == thread::id();}), m_threads.end());
+    int i = 0;
+    for (auto& e : m_tp->m_threads) {
+
+      if (e.get_id() == thread::id()) {
+        continue;
+      }
+      if (!contains(m_tp->m_done, e.get_id())) {
+
+        if (e.get_id() == this_thread::get_id()) {
+
+          return true;
+        }
+        break;
+      }
+    }
+
+    return false;
+  }
 };
 DEFINE_TASK(de_randomize);
 
 
 
-bool current_thread() {
-  unique_lock<mutex> lock(m_done_mutex);
- // m_threads.erase(std::remove_if(m_threads.begin(), m_threads.end(), [](auto& e) {return e.get_id() == thread::id();}), m_threads.end());
-  int i = 0;
-  for (auto& e : m_threads) {
-    
-    if (e.get_id()==thread::id()) {
-      continue;
-    }
-    if ( !contains(m_done,e.get_id())) {
-      
-      if (e.get_id()== this_thread::get_id()) {
-        
-        return true;
-      }
-      break;
-    }
-  }
-  
-  return false;
-}
+
 
 TASK_DEINITION(de_randomize& task_) {
-  std::unique_lock<std::mutex> lock(m);
-  while (!current_thread()) {
-    con.wait(lock);
+  std::unique_lock<std::mutex> lock(task_.m_tp->m);
+  while (!task_.current_thread()) {
+    task_.m_tp->con.wait(lock);
   }
   RUN_NEXT(*task_.buffer);
  // con.notify_all();
